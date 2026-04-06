@@ -22,8 +22,8 @@ Built with **Spring Boot** · **MongoDB** · **React** · **Docker** · **Groq A
 └───┬────────────┘       └─────────┬───────────┘
     │ REST                         │ HTTPS
 ┌───▼────────────┐       ┌─────────▼───────────┐
-│  Risk Service  │──────▶│   Claude AI API      │
-│  :8083         │  REST │  (Haiku)             │
+│  Risk Service  │──────▶│   Groq API           │
+│  :8083         │  REST │  (Llama 3.1)         │
 └───┬────────────┘       └─────────────────────┘
     │ REST
 ┌───▼────────────┐
@@ -41,7 +41,7 @@ Built with **Spring Boot** · **MongoDB** · **React** · **Docker** · **Groq A
 
 **Risk Service** — hybrid scoring: rule-based (40%) + LSTM Autoencoder (60%), graceful fallback if ML API is down.
 
-**Intelligence Service** — GenAI layer powered by Claude:
+**Intelligence Service** — GenAI layer powered by Groq (Llama 3.1):
 - `GET /api/intelligence/explain/{id}` — plain-English explanation of why a transaction was flagged
 - `POST /api/intelligence/query` — natural language → structured filters → transaction search
 
@@ -101,6 +101,7 @@ Records payments and triggers risk assessment on every transaction.
 | GET | `/api/transactions/sender/{id}` | Transactions by sender |
 | GET | `/api/transactions/flagged` | All HIGH-risk flagged transactions |
 | GET | `/api/transactions/stats` | Counts by status |
+| GET | `/api/transactions/search` | Search with filters (status, riskLevel, type, amountMin, amountMax) |
 | GET | `/api/transactions/health` | Health check |
 
 **Example — submit a transaction:**
@@ -219,7 +220,7 @@ cd frontend && npm install && npm start
 
 GitHub Actions runs on every push to `main`:
 
-- Builds all 3 Spring Boot services with Maven
+- Builds all 4 Spring Boot services with Maven (risk-service and intelligence-service run tests)
 - Builds the React frontend with npm
 - Validates `docker-compose.yml` syntax
 
@@ -235,7 +236,8 @@ payment-dashboard/
 ├── user-service/          # Spring Boot — account management
 ├── transaction-service/   # Spring Boot — payment processing + risk trigger
 ├── risk-service/          # Spring Boot — hybrid ML/rule risk scoring
-└── frontend/              # React — dashboard + transaction management
+├── intelligence-service/  # Spring Boot — Groq LLM explainability + NL query
+└── frontend/              # React — dashboard + AI query interface
 ```
 
 ---
