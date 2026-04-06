@@ -1,0 +1,77 @@
+services:
+
+  mongodb:
+    image: mongo:7.0
+    container_name: mongodb
+    ports:
+      - "27017:27017"
+    volumes:
+      - mongo_data:/data/db
+    environment:
+      MONGO_INITDB_DATABASE: paymentdb
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  user-service:
+    build: ./user-service
+    container_name: user-service
+    ports:
+      - "8081:8081"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/paymentdb
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  transaction-service:
+    build: ./transaction-service
+    container_name: transaction-service
+    ports:
+      - "8082:8082"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/paymentdb
+      RISK_SERVICE_URL: http://risk-service:8083
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      risk-service:
+        condition: service_started
+
+  risk-service:
+    build: ./risk-service
+    container_name: risk-service
+    ports:
+      - "8083:8083"
+    environment:
+      MONGO_URI: mongodb://mongodb:27017/paymentdb
+      PYTHON_ML_API_URL: http://host.docker.internal:8000
+    depends_on:
+      mongodb:
+        condition: service_healthy
+
+  intelligence-service:
+    build: ./intelligence-service
+    container_name: intelligence-service
+    ports:
+      - "8084:8084"
+    environment:
+      GROQ_API_KEY: ${GROQ_API_KEY}
+      TRANSACTION_SERVICE_URL: http://transaction-service:8082
+    depends_on:
+      - transaction-service
+
+  frontend:
+    build: ./frontend
+    container_name: frontend
+    ports:
+      - "3000:3000"
+    depends_on:
+      - transaction-service
+      - risk-service
+      - intelligence-service
+
+volumes:
+  mongo_data:
