@@ -30,8 +30,8 @@ jobs:
           java-version: '17'
           distribution: 'temurin'
           cache: maven
-      - name: Build transaction-service
-        run: mvn -B clean package -DskipTests
+      - name: Build and test transaction-service
+        run: mvn -B clean package
         working-directory: transaction-service
 
   build-risk-service:

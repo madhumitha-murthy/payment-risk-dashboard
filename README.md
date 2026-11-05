@@ -1,10 +1,10 @@
 # Payment Risk Dashboard
 
-[![CI](https://github.com/madhumitham/payment-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/madhumitham/payment-dashboard/actions/workflows/ci.yml)
+[![CI](https://github.com/madhumitha-murthy/payment-risk-dashboard/actions/workflows/ci.yml/badge.svg)](https://github.com/madhumitha-murthy/payment-risk-dashboard/actions/workflows/ci.yml)
 
 A full-stack fintech application combining microservices architecture, ML-powered risk scoring, and GenAI explainability — built to demonstrate how modern payment platforms can make AI-driven decisions transparent and queryable.
 
-Built with **Spring Boot** · **MongoDB** · **React** · **Docker** · **Groq AI (Llama 3.1)** · **Python FastAPI (ML)**
+Built with **Spring Boot** · **PostgreSQL** · **MongoDB** · **React** · **Docker** · **Groq AI (Llama 3.1)** · **Python FastAPI (ML)**
 
 ---
 
@@ -34,9 +34,12 @@ Built with **Spring Boot** · **MongoDB** · **React** · **Docker** · **Groq A
 │  User Service  │  :8081
 └───┬────────────┘
     │
-┌───▼────────────┐
-│    MongoDB     │  :27017
-└────────────────┘
+┌───▼────────────┐       ┌────────────────┐
+│    MongoDB     │       │  PostgreSQL    │
+│    :27017      │       │  :5432         │
+└────────────────┘       └────────────────┘
+  (user, risk,             (transaction-service
+   intelligence)            — ACID transfers)
 ```
 
 **Risk Service** — hybrid scoring: rule-based (40%) + LSTM Autoencoder (60%), graceful fallback if ML API is down.
@@ -52,7 +55,7 @@ Built with **Spring Boot** · **MongoDB** · **React** · **Docker** · **Groq A
 **Prerequisites:** Docker + Docker Compose + a free Groq API key ([get one at console.groq.com](https://console.groq.com) — no credit card required)
 
 ```bash
-git clone https://github.com/madhumitham/payment-dashboard.git
+git clone https://github.com/madhumitha-murthy/payment-risk-dashboard.git
 cd payment-dashboard
 GROQ_API_KEY=your_key_here docker compose up --build
 ```
@@ -103,6 +106,8 @@ Records payments and triggers risk assessment on every transaction.
 | GET | `/api/transactions/stats` | Counts by status |
 | GET | `/api/transactions/search` | Search with filters (status, riskLevel, type, amountMin, amountMax) |
 | GET | `/api/transactions/health` | Health check |
+| **POST** | **`/api/transfers`** | **ACID transfer between accounts (debit + credit + record, all or nothing)** |
+| **GET** | **`/api/transfers/report?from=&to=`** | **Daily aggregation: count + total amount grouped by risk level** |
 
 **Example — submit a transaction:**
 ```bash
@@ -119,6 +124,20 @@ curl -X POST http://localhost:8082/api/transactions \
 ```
 
 Response includes `riskScore`, `riskLevel`, and `status` (COMPLETED or FLAGGED).
+
+**Example — ACID transfer between accounts:**
+```bash
+curl -X POST http://localhost:8082/api/transfers \
+  -H "Content-Type: application/json" \
+  -d '{
+    "sourceAccountNumber": "ACC-001",
+    "destinationAccountNumber": "ACC-002",
+    "amount": 2500.00,
+    "description": "Rent payment"
+  }'
+```
+
+The transfer atomically debits the source, credits the destination, and records the transaction. If the source has insufficient funds, the entire operation rolls back. Concurrent transfers on the same account are handled via optimistic locking (HTTP 409 on conflict).
 
 ---
 
@@ -154,7 +173,7 @@ The ML API call is non-blocking — if the Python service is down, the system co
 | Frontend | React 18, Axios, nginx |
 | Backend | Spring Boot 3.2, Java 17 (4 microservices) |
 | GenAI | Groq API — Llama 3.1 8B (free tier) — transaction explainability + NL query |
-| Database | MongoDB 7.0 |
+| Database | PostgreSQL 16 (transaction-service — JPA/Hibernate, Flyway), MongoDB 7.0 (other services) |
 | ML API | Python FastAPI + LSTM Autoencoder |
 | Containerisation | Docker, Docker Compose |
 | CI/CD | GitHub Actions |
@@ -195,11 +214,11 @@ docker compose up --build
 
 ## Local Development (without Docker)
 
-Run each service independently against a local MongoDB instance.
+Run each service independently against local databases.
 
 ```bash
-# 1. Start MongoDB
-docker compose up mongodb -d
+# 1. Start MongoDB + PostgreSQL
+docker compose up mongodb postgres -d
 
 # 2. Run user-service
 cd user-service && mvn spring-boot:run
@@ -207,7 +226,7 @@ cd user-service && mvn spring-boot:run
 # 3. Run risk-service
 cd risk-service && mvn spring-boot:run
 
-# 4. Run transaction-service
+# 4. Run transaction-service (connects to PostgreSQL, Flyway auto-migrates)
 cd transaction-service && mvn spring-boot:run
 
 # 5. Run frontend
@@ -220,7 +239,7 @@ cd frontend && npm install && npm start
 
 GitHub Actions runs on every push to `main`:
 
-- Builds all 4 Spring Boot services with Maven (risk-service and intelligence-service run tests)
+- Builds all 4 Spring Boot services with Maven (transaction-service, risk-service, and intelligence-service run tests)
 - Builds the React frontend with npm
 - Validates `docker-compose.yml` syntax
 
@@ -242,7 +261,36 @@ payment-dashboard/
 
 ---
 
+## Why PostgreSQL for Transactions
+
+This project uses **polyglot persistence** — PostgreSQL for the transaction service, MongoDB for everything else. Here's why:
+
+**ACID guarantees for money movement.** A transfer must debit one account and credit another atomically. If the credit fails, the debit must roll back. PostgreSQL's `@Transactional` with `READ COMMITTED` isolation ensures this — MongoDB's multi-document transactions are possible but lack the mature tooling (Flyway, JPA Criteria API, JPQL aggregation).
+
+**Optimistic locking with `@Version`.** The `Account` entity uses Hibernate's `@Version` column. When two concurrent transfers touch the same account, the second one gets an `ObjectOptimisticLockingFailureException` (HTTP 409) instead of silently overwriting. This prevents lost updates without the performance cost of pessimistic `SELECT ... FOR UPDATE`.
+
+**Flyway schema migrations.** Database schema changes are version-controlled in `db/migration/V1__init.sql`, `V2__seed_data.sql`. Every environment (dev, CI, production) runs the same migrations in order — no drift.
+
+**Why the other services stay on MongoDB.** User profiles, risk assessments, and AI explanations are document-oriented with flexible schemas. They don't need cross-document ACID transactions. MongoDB is the better fit there.
+
+### New endpoints
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/api/transfers` | Atomic account-to-account transfer |
+| GET | `/api/transfers/report?from=YYYY-MM-DD&to=YYYY-MM-DD` | Daily risk aggregation |
+
+### Running the integration tests
+
+The tests use [Testcontainers](https://testcontainers.com/) — they spin up a real PostgreSQL 16 container, run Flyway migrations, and execute against it. Docker must be running.
+
+```bash
+cd transaction-service
+mvn clean test
+```
+
+---
+
 ## Related Projects
 
-- [anomaly-detection](https://github.com/madhumitham/anomaly-detection) — LSTM Autoencoder for transaction anomaly detection (Python/PyTorch)
-# payment-risk-dashboard
+- [anomaly-detection](https://github.com/madhumitha-murthy/anomaly-detection) — LSTM Autoencoder for transaction anomaly detection (Python/PyTorch)

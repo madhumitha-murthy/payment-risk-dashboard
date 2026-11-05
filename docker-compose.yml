@@ -1,5 +1,22 @@
 services:
 
+  postgres:
+    image: postgres:16-alpine
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-transactiondb}
+      POSTGRES_USER: ${POSTGRES_USER:-txuser}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-txpass}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-txuser} -d ${POSTGRES_DB:-transactiondb}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   mongodb:
     image: mongo:7.0
     container_name: mongodb
@@ -32,10 +49,12 @@ services:
     ports:
       - "8082:8082"
     environment:
-      MONGO_URI: mongodb://mongodb:27017/paymentdb
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-transactiondb}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-txuser}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD:-txpass}
       RISK_SERVICE_URL: http://risk-service:8083
     depends_on:
-      mongodb:
+      postgres:
         condition: service_healthy
       risk-service:
         condition: service_started
@@ -74,4 +93,5 @@ services:
       - intelligence-service
 
 volumes:
+  postgres_data:
   mongo_data:

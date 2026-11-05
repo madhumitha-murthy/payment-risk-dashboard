@@ -1,52 +1,72 @@
 package com.madhumitha.transactionservice.model;
 
-import lombok.AllArgsConstructor;
-import lombok.Builder;
-import lombok.Data;
-import lombok.NoArgsConstructor;
-import org.springframework.data.annotation.Id;
-import org.springframework.data.mongodb.core.mapping.Document;
-import org.springframework.data.mongodb.core.index.Indexed;
-
+import com.madhumitha.transactionservice.model.enums.RiskLevel;
+import com.madhumitha.transactionservice.model.enums.TransactionStatus;
+import com.madhumitha.transactionservice.model.enums.TransactionType;
+import jakarta.persistence.*;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Positive;
+import lombok.*;
+
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 
-@Data
-@Builder
+@Entity
+@Table(name = "transactions")
+@Getter
+@Setter
 @NoArgsConstructor
 @AllArgsConstructor
-@Document(collection = "transactions")
+@Builder
 public class Transaction {
 
     @Id
-    private String id;
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
 
     @NotBlank(message = "Sender ID is required")
-    @Indexed
+    @Column(nullable = false)
     private String senderId;
 
     @NotBlank(message = "Receiver ID is required")
+    @Column(nullable = false)
     private String receiverId;
 
     @Positive(message = "Amount must be positive")
-    private Double amount;
+    @Column(nullable = false, precision = 19, scale = 4)
+    private BigDecimal amount;
 
-    @NotBlank(message = "Currency is required")
+    @Column(nullable = false, length = 3)
     @Builder.Default
     private String currency = "SGD";
 
-    @NotBlank(message = "Transaction type is required")
-    private String type; // TRANSFER, PAYMENT, REFUND
-
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
     @Builder.Default
-    private String status = "PENDING"; // PENDING, COMPLETED, FLAGGED, REJECTED
+    private TransactionType type = TransactionType.TRANSFER;
 
-    private String riskLevel; // LOW, MEDIUM, HIGH
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private TransactionStatus status = TransactionStatus.PENDING;
+
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    private RiskLevel riskLevel;
+
     private Double riskScore;
 
     private String description;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "source_account_id")
+    private Account sourceAccount;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "destination_account_id")
+    private Account destinationAccount;
+
+    @Column(nullable = false, updatable = false)
     @Builder.Default
     private LocalDateTime createdAt = LocalDateTime.now();
 
